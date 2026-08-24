@@ -14,12 +14,33 @@ const createBill = asyncHandler(async (req, res) => {
     bill_number,
     bill_date,
     total_amount,
-    paid_amount,
+    paid_amount = 0,
     due_date,
     payment_mode,
     payment_reference,
     notes,
   } = req.body;
+
+  // Check Vendor ID present
+  if (!vendor_id) {
+    return res.status(400).json({
+      success: false,
+      message: "Vendor is required",
+    });
+  }
+
+  // ✅ Vendor Ownership Check — vendor isi owner ka hona chahiye
+  const [vendorExists] = await db.query(
+    vendorBillPostQueries.checkVendorOwnership,
+    [vendor_id, owner_id]
+  );
+
+  if (vendorExists.length === 0) {
+    return res.status(404).json({
+      success: false,
+      message: "Vendor not found",
+    });
+  }
 
   // Check Bill Number
   const [billExists] = await db.query(
@@ -34,33 +55,56 @@ const createBill = asyncHandler(async (req, res) => {
     });
   }
 
-  const remaining_amount =
-    Number(total_amount) - Number(paid_amount);
+  const totalAmount = Number(total_amount);
+const paidAmount = Number(paid_amount);
+
+if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
+  return res.status(400).json({
+    success: false,
+    message: "Valid total amount is required",
+  });
+}
+
+if (!Number.isFinite(paidAmount) || paidAmount < 0) {
+  return res.status(400).json({
+    success: false,
+    message: "Valid paid amount is required",
+  });
+}
+
+if (paidAmount > totalAmount) {
+  return res.status(400).json({
+    success: false,
+    message: "Paid amount cannot be greater than total amount",
+  });
+}
+
+  const remaining_amount = totalAmount - paidAmount;
 
   let status = "Pending";
 
-  if (Number(paid_amount) === 0) {
-    status = "Pending";
-  } else if (Number(paid_amount) < Number(total_amount)) {
-    status = "Partial";
-  } else {
-    status = "Paid";
-  }
+ if (paidAmount === 0) {
+  status = "Pending";
+} else if (paidAmount < totalAmount) {
+  status = "Partial";
+} else {
+  status = "Paid";
+}
 
-  await db.query(vendorBillPostQueries.createBill, [
-    owner_id,
-    vendor_id,
-    bill_number,
-    bill_date,
-    total_amount,
-    paid_amount,
-    remaining_amount,
-    due_date,
-    payment_mode,
-    payment_reference,
-    status,
-    notes,
-  ]);
+ await db.query(vendorBillPostQueries.createBill, [
+  owner_id,
+  vendor_id,
+  bill_number,
+  bill_date,
+  totalAmount,
+  paidAmount,
+  remaining_amount,
+  due_date,
+  payment_mode,
+  payment_reference,
+  status,
+  notes,
+]);
 
   res.status(201).json({
     success: true,
@@ -319,6 +363,13 @@ const addPayment = asyncHandler(async (req, res) => {
   const totalAmount = Number(vendorBill.total_amount);
   const paidAmount = Number(vendorBill.paid_amount);
   const paymentAmount = Number(amount);
+
+  if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
+  return res.status(400).json({
+    success: false,
+    message: "Valid payment amount is required",
+  });
+}
 
   // Validation
   if (paymentAmount <= 0) {

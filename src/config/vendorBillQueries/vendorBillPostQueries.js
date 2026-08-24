@@ -5,6 +5,14 @@ const vendorBillPostQueries = {
     WHERE bill_number = ?
   `,
 
+  // Vendor ownership check — vendor us owner ka hi hona chahiye
+  checkVendorOwnership: `
+    SELECT id
+    FROM vendors
+    WHERE id = ?
+      AND owner_id = ?
+  `,
+
   createBill: `
     INSERT INTO vendor_bills (
       owner_id,

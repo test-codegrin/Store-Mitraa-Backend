@@ -139,11 +139,10 @@ WHERE owner_id = ?
   AND created_at >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
 
 GROUP BY
-    YEAR(created_at),
-    MONTH(created_at)
+    DATE_FORMAT(created_at, '%Y-%m'),
+    DATE_FORMAT(created_at, '%b %y')
 ORDER BY
-    YEAR(created_at),
-    MONTH(created_at)
+    DATE_FORMAT(created_at, '%Y-%m')
 `,
 
 getGrowthMix: `
@@ -182,12 +181,11 @@ WHERE i.owner_id = ?
   AND i.created_at >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
 
 GROUP BY
-    YEAR(i.created_at),
-    MONTH(i.created_at)
+    DATE_FORMAT(i.created_at, '%Y-%m'),
+    DATE_FORMAT(i.created_at, '%b %y')
 
 ORDER BY
-    YEAR(i.created_at),
-    MONTH(i.created_at)
+    DATE_FORMAT(i.created_at, '%Y-%m')
 `,
 
 filterCustomers: `
@@ -320,8 +318,8 @@ LIMIT 4
     FROM invoices
     WHERE customer_id = ? AND owner_id = ?
       AND created_at >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
-    GROUP BY YEAR(created_at), MONTH(created_at)
-    ORDER BY YEAR(created_at), MONTH(created_at)
+    GROUP BY DATE_FORMAT(created_at, '%Y-%m')
+    ORDER BY DATE_FORMAT(created_at, '%Y-%m')
   `,
 
 };

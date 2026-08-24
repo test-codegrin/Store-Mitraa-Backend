@@ -11,6 +11,7 @@ const {
     deleteVendor,
     getVendorDashboard,
     filterVendors,
+    getTopRegularVendors,
     getVendorDetailsDashboard
 } = require("../controllers/vendor.controller");
 
@@ -19,6 +20,8 @@ router.post("/", verifyToken, createVendor);
 router.get("/dashboard", verifyToken, getVendorDashboard);
 
 router.get("/filter", verifyToken, filterVendors);
+
+router.get("/top-regular", verifyToken, getTopRegularVendors);
 
 router.get("/", verifyToken, getAllVendors);
 

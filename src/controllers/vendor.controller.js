@@ -309,6 +309,23 @@ const filterVendors = asyncHandler(async (req, res) => {
   });
 });
 
+// Top 3 "regular" vendors — jinka bill baar-baar aata hai (bill_count > 1)
+// One-time ya zero-bill vendors is list mein nahi aayenge
+const getTopRegularVendors = asyncHandler(async (req, res) => {
+  const owner_id = req.owner.id;
+
+  const [vendors] = await db.query(
+    vendorGetQueries.getTopRegularVendors,
+    [owner_id]
+  );
+
+  return res.status(200).json({
+    success: true,
+    count: vendors.length,
+    data: vendors,
+  });
+});
+
 const getVendorDetailsDashboard = asyncHandler(async (req, res) => {
   const owner_id = req.owner.id;
   const { id } = req.params;
@@ -337,5 +354,6 @@ module.exports = {
   deleteVendor,
   getVendorDashboard,
   filterVendors,
+  getTopRegularVendors,
   getVendorDetailsDashboard
 };

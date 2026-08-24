@@ -248,11 +248,10 @@ FROM expenses
 WHERE owner_id = ?
 AND expense_date >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
 GROUP BY
-    YEAR(expense_date),
-    MONTH(expense_date)
+    DATE_FORMAT(expense_date, '%Y-%m'),
+    DATE_FORMAT(expense_date, '%b')
 ORDER BY
-    YEAR(expense_date),
-    MONTH(expense_date)
+    DATE_FORMAT(expense_date, '%Y-%m')
 `,
 };
  

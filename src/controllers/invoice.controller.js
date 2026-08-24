@@ -41,7 +41,7 @@ const createInvoice = asyncHandler(async (req, res) => {
     });
   }
 
-  // Remove extra spaces
+  // Remove extra spaces`
   const phone = phone_number.trim();
 
   // Check Customer
