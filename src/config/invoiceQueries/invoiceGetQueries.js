@@ -3,6 +3,7 @@ const invoiceGetQueries = {
     SELECT
       i.id,
       i.invoice_number,
+      i.invoice_date,
       i.created_at,
       i.total_amount,
       i.discount_total,
@@ -76,6 +77,7 @@ ORDER BY id ASC
   SELECT
     i.id,
     i.invoice_number,
+    i.invoice_date,
     i.created_at,
     i.total_amount,
     i.discount_total,
@@ -105,6 +107,7 @@ getInvoicePreview: `
   SELECT
     i.id,
     i.invoice_number,
+    i.invoice_date,
     i.created_at,
 
     i.subtotal,

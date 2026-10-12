@@ -230,6 +230,7 @@ CREATE TABLE invoices (
     customer_id INT NOT NULL,
 
     invoice_number VARCHAR(100) NOT NULL UNIQUE,
+    invoice_date DATE NOT NULL,
 
     subtotal DECIMAL(10,2) NOT NULL DEFAULT 0.00,
     discount_total DECIMAL(10,2) NOT NULL DEFAULT 0.00,

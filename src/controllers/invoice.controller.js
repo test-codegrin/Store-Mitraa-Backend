@@ -13,6 +13,30 @@ const customerPutQueries = require("../config/customerQueries/customerPutQueries
 
 const generateInvoicePDF = require("../utils/pdfGenerator");
 
+const getTodayDate = () => {
+  try {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
+  } catch (e) {
+    return new Date().toISOString().split("T")[0];
+  }
+};
+
+const formatDate = (date) => {
+  if (!date) return getTodayDate();
+  if (typeof date === "string") {
+    const trimmed = date.trim();
+    if (!trimmed) return getTodayDate();
+    return trimmed.split("T")[0];
+  }
+  if (date instanceof Date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+  return getTodayDate();
+};
+
 const createInvoice = asyncHandler(async (req, res) => {
   const {
     first_name,
@@ -24,6 +48,7 @@ const createInvoice = asyncHandler(async (req, res) => {
     pincode,
     gst_number,
     address,
+    invoice_date,
     payment_mode,
     paid_amount,
     extra_discount,
@@ -189,12 +214,14 @@ const createInvoice = asyncHandler(async (req, res) => {
   }
 
   const invoiceNumber = `INV-${Date.now()}`;
+  const finalInvoiceDate = invoice_date ? formatDate(invoice_date) : getTodayDate();
 
   // Save Invoice
   const [result] = await db.query(invoicePostQueries.createInvoice, [
     owner_id,
     customer_id,
     invoiceNumber,
+    finalInvoiceDate,
     subtotal,
     discountTotal,
     extraDiscount,  
@@ -239,6 +266,7 @@ const createInvoice = asyncHandler(async (req, res) => {
     message: "Invoice created successfully",
     invoice_id: invoiceId,
     invoice_number: invoiceNumber,
+    invoice_date: finalInvoiceDate,
   });
 });
 
@@ -495,6 +523,7 @@ const updateInvoice = asyncHandler(async (req, res) => {
 
    const {
     customer_id,
+    invoice_date,
     first_name,
     last_name,
     phone_number,
@@ -708,8 +737,13 @@ if (phoneExists.length > 0) {
     paymentStatus = "Partial";
   }
 
+  const finalInvoiceDate = invoice_date
+    ? formatDate(invoice_date)
+    : (invoice[0]?.invoice_date ? formatDate(invoice[0].invoice_date) : getTodayDate());
+
   await db.query(invoicePutQueries.updateInvoice, [
     customer_id,
+    finalInvoiceDate,
     subtotal,
     discountTotal,
     extraDiscount,

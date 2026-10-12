@@ -23,7 +23,7 @@ const invoicePutQueries = {
   `,
 
   getInvoice: `
-    SELECT id
+    SELECT id, invoice_date
     FROM invoices
     WHERE id = ?
     AND owner_id = ?
@@ -54,6 +54,7 @@ const invoicePutQueries = {
   UPDATE invoices
   SET
     customer_id = ?,
+    invoice_date = ?,
     subtotal = ?,
     discount_total = ?,
     extra_discount = ?,
