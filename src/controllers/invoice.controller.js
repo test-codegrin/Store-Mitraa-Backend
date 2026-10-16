@@ -39,6 +39,7 @@ const formatDate = (date) => {
 
 const createInvoice = asyncHandler(async (req, res) => {
   const {
+    customer_id: body_customer_id,
     first_name,
     last_name,
     phone_number,
@@ -58,33 +59,37 @@ const createInvoice = asyncHandler(async (req, res) => {
 
   const owner_id = req.owner.id;
 
-  // Validate Phone Number
-  if (!phone_number) {
-    return res.status(400).json({
-      success: false,
-      message: "Phone number is required",
-    });
-  }
+  // Validate Phone Number (commented out for now)
+  // if (!phone_number) {
+  //   return res.status(400).json({
+  //     success: false,
+  //     message: "Phone number is required",
+  //   });
+  // }
 
-  // Remove extra spaces`
-  const phone = phone_number.trim();
+  // Remove extra spaces
+  const phone = phone_number ? phone_number.trim() : null;
 
   // Check Customer
-  let customer_id;
+  let customer_id = body_customer_id;
 
-  const [customers] = await db.query(invoicePostQueries.checkCustomerByPhone, [
-    owner_id,
-    phone,
-  ]);
+  if (!customer_id && phone) {
+    const [customers] = await db.query(invoicePostQueries.checkCustomerByPhone, [
+      owner_id,
+      phone,
+    ]);
 
-  if (customers.length > 0) {
-    customer_id = customers[0].id;
-  } else {
+    if (customers.length > 0) {
+      customer_id = customers[0].id;
+    }
+  }
+
+  if (!customer_id) {
     const [customerResult] = await db.query(invoicePostQueries.createCustomer, [
       owner_id,
       first_name,
       last_name,
-      phone,
+      phone || null,
       email,
       city,
       state,
@@ -568,22 +573,24 @@ const updateInvoice = asyncHandler(async (req, res) => {
     });
   }
 
-  const [phoneExists] = await db.query(
-  customerPutQueries.checkPhoneExcludingSelf,
-  [phone_number, customer_id, owner_id],
-);
+  if (phone_number) {
+    const [phoneExists] = await db.query(
+      customerPutQueries.checkPhoneExcludingSelf,
+      [phone_number, customer_id, owner_id],
+    );
 
-if (phoneExists.length > 0) {
-  return res.status(400).json({
-    success: false,
-    message: "Phone number already exists for another customer",
-  });
-}
+    if (phoneExists.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Phone number already exists for another customer",
+      });
+    }
+  }
 
-   await db.query(invoicePutQueries.updateCustomer, [
+  await db.query(invoicePutQueries.updateCustomer, [
     first_name,
     last_name,
-    phone_number,
+    phone_number || null,
     email,
     address,
     city,

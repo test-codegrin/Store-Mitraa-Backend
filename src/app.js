@@ -7,11 +7,26 @@ const path = require("path");
 const app = express();
 app.set("json spaces", 2);
 
+// CORS configuration to allow all origins, methods, and headers
+const corsOptions = {
+  origin: true, // Allow all origins (localhost, IP, live domains, etc.)
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: [
+    "Origin",
+    "X-Requested-With",
+    "Content-Type",
+    "Accept",
+    "Authorization",
+  ],
+  optionsSuccessStatus: 200,
+};
+
 // Middlewares
+app.use(cors(corsOptions));
+app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(cors());
-app.use(helmet({crossOriginResourcePolicy: { policy: "cross-origin" }}));
 app.use(morgan("dev"));
 app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 
