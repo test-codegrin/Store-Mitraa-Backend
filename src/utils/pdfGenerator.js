@@ -22,26 +22,44 @@ const generateInvoicePDF = async (data, filePath) => {
     ],
   });
 
-  const page = await browser.newPage();
+  try {
+    const page = await browser.newPage();
+    await page.setViewport({
+      width: 794,
+      height: 1123,
+      deviceScaleFactor: 1,
+    });
 
-  // Load HTML
-  await page.setContent(html, {
-    waitUntil: "networkidle0",
-  });
+    // Load the invoice and wait for the same Poppins font used by the frontend.
+    await page.setContent(html, {
+      waitUntil: "networkidle0",
+    });
+    await page.evaluate(() => document.fonts.ready);
 
-  // Create Folder
-  fs.mkdirSync(path.dirname(filePath), {
-    recursive: true,
-  });
+    // Size short invoices to their rendered UI instead of forcing an empty
+    // A4-height page below the footer.
+    const contentHeight = await page.$eval(
+      ".invoice-paper",
+      (element) => Math.ceil(element.getBoundingClientRect().height),
+    );
 
-  // Save PDF
-  await page.pdf({
-    path: filePath,
-    format: "A4",
-    printBackground: true,
-  });
+    // Create Folder
+    fs.mkdirSync(path.dirname(filePath), {
+      recursive: true,
+    });
 
-  await browser.close();
+    // Keep the A4 width used by the UI, but crop the page height to its content.
+    await page.pdf({
+      path: filePath,
+      width: "210mm",
+      height: `${contentHeight}px`,
+      margin: { top: 0, right: 0, bottom: 0, left: 0 },
+      preferCSSPageSize: false,
+      printBackground: true,
+    });
+  } finally {
+    await browser.close();
+  }
 
   return filePath;
 };

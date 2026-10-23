@@ -1,4 +1,13 @@
 const invoicePutQueries = {
+  checkInvoiceNumberExcludingSelf: `
+    SELECT id
+    FROM invoices
+    WHERE owner_id = ?
+    AND invoice_number = ?
+    AND id <> ?
+    LIMIT 1
+  `,
+
   checkCustomer: `
     SELECT id
     FROM customers
@@ -23,7 +32,7 @@ const invoicePutQueries = {
   `,
 
   getInvoice: `
-    SELECT id, invoice_date
+    SELECT id, invoice_number, invoice_date
     FROM invoices
     WHERE id = ?
     AND owner_id = ?
@@ -54,6 +63,7 @@ const invoicePutQueries = {
   UPDATE invoices
   SET
     customer_id = ?,
+    invoice_number = ?,
     invoice_date = ?,
     subtotal = ?,
     discount_total = ?,

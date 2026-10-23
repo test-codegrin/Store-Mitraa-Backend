@@ -1,10 +1,12 @@
 const invoiceDeleteQueries = {
   getInvoice: `
     SELECT
-      id
+      id,
+      pdf_path
     FROM invoices
     WHERE id = ?
     AND owner_id = ?
+    FOR UPDATE
   `,
 
   getInvoiceItems: `
@@ -15,18 +17,9 @@ const invoiceDeleteQueries = {
     WHERE invoice_id = ?
   `,
 
-  getProductById: `
-    SELECT
-      id,
-      stock_quantity
-    FROM products
-    WHERE id = ?
-    AND owner_id = ?
-  `,
-
   updateProductStock: `
     UPDATE products
-    SET stock_quantity = ?
+    SET stock_quantity = stock_quantity + ?
     WHERE id = ?
     AND owner_id = ?
   `,

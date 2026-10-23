@@ -229,7 +229,7 @@ CREATE TABLE invoices (
     owner_id INT NOT NULL,
     customer_id INT NOT NULL,
 
-    invoice_number VARCHAR(100) NOT NULL UNIQUE,
+    invoice_number VARCHAR(100) NOT NULL,
     invoice_date DATE NOT NULL,
 
     subtotal DECIMAL(10,2) NOT NULL DEFAULT 0.00,
@@ -261,6 +261,9 @@ CREATE TABLE invoices (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ON UPDATE CURRENT_TIMESTAMP,
+
+    CONSTRAINT uq_invoices_owner_invoice_number
+        UNIQUE (owner_id, invoice_number),
 
     CONSTRAINT fk_invoice_owner
         FOREIGN KEY (owner_id)

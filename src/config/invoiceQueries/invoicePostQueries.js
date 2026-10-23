@@ -1,4 +1,12 @@
 const invoicePostQueries = {
+  checkInvoiceNumber: `
+    SELECT id
+    FROM invoices
+    WHERE owner_id = ?
+    AND invoice_number = ?
+    LIMIT 1
+  `,
+
   checkCustomerByPhone: `
     SELECT id
     FROM customers
@@ -78,9 +86,10 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 
   updateProductStock: `
     UPDATE products
-    SET stock_quantity = ?
+    SET stock_quantity = stock_quantity - ?
     WHERE id = ?
     AND owner_id = ?
+    AND stock_quantity >= ?
   `,
 };
 

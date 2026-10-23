@@ -13,6 +13,35 @@ const customerPutQueries = require("../config/customerQueries/customerPutQueries
 
 const generateInvoicePDF = require("../utils/pdfGenerator");
 
+const invoiceUploadsRoot = path.resolve(
+  __dirname,
+  "../../uploads/invoices",
+);
+
+const removeStoredInvoicePdf = async (pdfPath) => {
+  if (typeof pdfPath !== "string" || !pdfPath.trim()) return false;
+
+  const resolvedPdfPath = path.resolve(pdfPath);
+  const relativePath = path.relative(invoiceUploadsRoot, resolvedPdfPath);
+
+  // Only files created inside this application's invoice upload directory
+  // are eligible for deletion, even if the database value is malformed.
+  if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+    console.warn(`Skipped unsafe invoice PDF path: ${pdfPath}`);
+    return false;
+  }
+
+  try {
+    await fs.promises.unlink(resolvedPdfPath);
+    return true;
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      console.error("Failed to delete stored invoice PDF:", error);
+    }
+    return false;
+  }
+};
+
 const getTodayDate = () => {
   try {
     return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
@@ -37,6 +66,14 @@ const formatDate = (date) => {
   return getTodayDate();
 };
 
+const duplicateInvoiceNumberResponse = (res) =>
+  res.status(409).json({
+    success: false,
+    message: "Invoice number already exists.",
+  });
+
+const isDuplicateEntryError = (error) => error?.code === "ER_DUP_ENTRY";
+
 const createInvoice = asyncHandler(async (req, res) => {
   const {
     customer_id: body_customer_id,
@@ -49,6 +86,7 @@ const createInvoice = asyncHandler(async (req, res) => {
     pincode,
     gst_number,
     address,
+    invoice_number,
     invoice_date,
     payment_mode,
     paid_amount,
@@ -58,6 +96,18 @@ const createInvoice = asyncHandler(async (req, res) => {
   } = req.body;
 
   const owner_id = req.owner.id;
+  const requestedInvoiceNumber =
+    typeof invoice_number === "string" ? invoice_number.trim() : "";
+  const invoiceNumber = requestedInvoiceNumber || `INV-${Date.now()}`;
+
+  const [duplicateInvoices] = await db.query(
+    invoicePostQueries.checkInvoiceNumber,
+    [owner_id, invoiceNumber],
+  );
+
+  if (duplicateInvoices.length > 0) {
+    return duplicateInvoiceNumberResponse(res);
+  }
 
   // Validate Phone Number (commented out for now)
   // if (!phone_number) {
@@ -115,33 +165,45 @@ const createInvoice = asyncHandler(async (req, res) => {
   let taxTotal = 0;
 
   const invoiceItems = [];
+  const productsById = new Map();
+  const requestedQuantityByProduct = new Map();
 
   for (const item of items) {
-    const [products] = await db.query(invoicePostQueries.getProductById, [
-      item.product_id,
-      owner_id,
-    ]);
+    const quantity = Number(item.quantity);
 
-    if (products.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: `Product not found : ${item.product_id}`,
-      });
-    }
-
-    const product = products[0];
-
-    if (product.stock_quantity < item.quantity) {
+    if (!Number.isInteger(quantity) || quantity <= 0) {
       return res.status(400).json({
         success: false,
-        message: `${product.product_name} is out of stock`,
+        message: "Product quantity must be a positive whole number",
       });
     }
+
+    let product = productsById.get(item.product_id);
+
+    if (!product) {
+      const [products] = await db.query(invoicePostQueries.getProductById, [
+        item.product_id,
+        owner_id,
+      ]);
+
+      if (products.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: `Product not found : ${item.product_id}`,
+        });
+      }
+
+      product = products[0];
+      productsById.set(item.product_id, product);
+    }
+
+    requestedQuantityByProduct.set(
+      item.product_id,
+      (requestedQuantityByProduct.get(item.product_id) || 0) + quantity,
+    );
 
     const mrp = Number(product.product_mrp);
     const buyingPrice = Number(product.buying_price);
-
-    const quantity = Number(item.quantity);
 
     const discountPercentage = Number(item.discount_percentage || 0);
 
@@ -183,6 +245,17 @@ const createInvoice = asyncHandler(async (req, res) => {
     });
   }
 
+  for (const [productId, requestedQuantity] of requestedQuantityByProduct) {
+    const product = productsById.get(productId);
+
+    if (Number(product.stock_quantity) < requestedQuantity) {
+      return res.status(400).json({
+        success: false,
+        message: `${product.product_name} has only ${product.stock_quantity} item(s) in stock`,
+      });
+    }
+  }
+
   const extraDiscount = Number(extra_discount || 0);
 
   const totalAmount = subtotal - discountTotal - extraDiscount + taxTotal;
@@ -218,61 +291,94 @@ const createInvoice = asyncHandler(async (req, res) => {
     paymentStatus = "Partial";
   }
 
-  const invoiceNumber = `INV-${Date.now()}`;
   const finalInvoiceDate = invoice_date ? formatDate(invoice_date) : getTodayDate();
 
-  // Save Invoice
-  const [result] = await db.query(invoicePostQueries.createInvoice, [
-    owner_id,
-    customer_id,
-    invoiceNumber,
-    finalInvoiceDate,
-    subtotal,
-    discountTotal,
-    extraDiscount,  
-    taxTotal,
-    totalAmountRounded,
-    paidAmountRounded,
-    remainingAmount,
-    payment_mode,
-    paymentStatus,
-    notes,
-  ]);
+  // Save the invoice, its items, and its stock changes as one operation.
+  // This prevents a failed bill from leaving partial stock deductions behind.
+  const connection = await db.getConnection();
+  let result;
 
-  const invoiceId = result.insertId;
+  try {
+    await connection.beginTransaction();
 
-  for (const item of invoiceItems) {
-    await db.query(invoicePostQueries.createInvoiceItem, [
-      invoiceId,
-      item.product.id,
-      item.product.product_name,
-      item.product.product_sku,
-      item.mrp,
-      item.quantity,
-      item.buying_price,
-      item.selling_price,
-      item.discount_percentage,
-      item.discount,
-      item.tax,
-      item.line_total,
-    ]);
-
-    const newStock = item.product.stock_quantity - item.quantity;
-
-    await db.query(invoicePostQueries.updateProductStock, [
-      newStock,
-      item.product.id,
+    [result] = await connection.query(invoicePostQueries.createInvoice, [
       owner_id,
+      customer_id,
+      invoiceNumber,
+      finalInvoiceDate,
+      subtotal,
+      discountTotal,
+      extraDiscount,
+      taxTotal,
+      totalAmountRounded,
+      paidAmountRounded,
+      remainingAmount,
+      payment_mode,
+      paymentStatus,
+      notes,
     ]);
-  }
+    const invoiceId = result.insertId;
 
-  return res.status(201).json({
-    success: true,
-    message: "Invoice created successfully",
-    invoice_id: invoiceId,
-    invoice_number: invoiceNumber,
-    invoice_date: finalInvoiceDate,
-  });
+    for (const item of invoiceItems) {
+      await connection.query(invoicePostQueries.createInvoiceItem, [
+        invoiceId,
+        item.product.id,
+        item.product.product_name,
+        item.product.product_sku,
+        item.mrp,
+        item.quantity,
+        item.buying_price,
+        item.selling_price,
+        item.discount_percentage,
+        item.discount,
+        item.tax,
+        item.line_total,
+      ]);
+    }
+
+    for (const [productId, requestedQuantity] of requestedQuantityByProduct) {
+      const [stockResult] = await connection.query(
+        invoicePostQueries.updateProductStock,
+        [requestedQuantity, productId, owner_id, requestedQuantity],
+      );
+
+      if (stockResult.affectedRows !== 1) {
+        const product = productsById.get(productId);
+        const stockError = new Error(
+          `${product.product_name} does not have enough stock`,
+        );
+        stockError.code = "INSUFFICIENT_STOCK";
+        throw stockError;
+      }
+    }
+
+    await connection.commit();
+
+    return res.status(201).json({
+      success: true,
+      message: "Invoice created successfully",
+      invoice_id: invoiceId,
+      invoice_number: invoiceNumber,
+      invoice_date: finalInvoiceDate,
+    });
+  } catch (error) {
+    await connection.rollback();
+
+    if (isDuplicateEntryError(error)) {
+      return duplicateInvoiceNumberResponse(res);
+    }
+
+    if (error.code === "INSUFFICIENT_STOCK") {
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
+
+    throw error;
+  } finally {
+    connection.release();
+  }
 });
 
 const getAllInvoices = asyncHandler(async (req, res) => {
@@ -528,6 +634,7 @@ const updateInvoice = asyncHandler(async (req, res) => {
 
    const {
     customer_id,
+    invoice_number,
     invoice_date,
     first_name,
     last_name,
@@ -558,6 +665,19 @@ const updateInvoice = asyncHandler(async (req, res) => {
       success: false,
       message: "Invoice not found",
     });
+  }
+
+  const requestedInvoiceNumber =
+    typeof invoice_number === "string" ? invoice_number.trim() : "";
+  const invoiceNumber = requestedInvoiceNumber || invoice[0].invoice_number;
+
+  const [duplicateInvoices] = await db.query(
+    invoicePutQueries.checkInvoiceNumberExcludingSelf,
+    [owner_id, invoiceNumber, id],
+  );
+
+  if (duplicateInvoices.length > 0) {
+    return duplicateInvoiceNumberResponse(res);
   }
 
   // Check Customer
@@ -748,22 +868,30 @@ const updateInvoice = asyncHandler(async (req, res) => {
     ? formatDate(invoice_date)
     : (invoice[0]?.invoice_date ? formatDate(invoice[0].invoice_date) : getTodayDate());
 
-  await db.query(invoicePutQueries.updateInvoice, [
-    customer_id,
-    finalInvoiceDate,
-    subtotal,
-    discountTotal,
-    extraDiscount,
-    taxTotal,
-    totalAmountRounded,
-    paidAmountRounded,
-    remainingAmount,
-    payment_mode,
-    paymentStatus,
-    notes,
-    id,
-    owner_id,
-  ]);
+  try {
+    await db.query(invoicePutQueries.updateInvoice, [
+      customer_id,
+      invoiceNumber,
+      finalInvoiceDate,
+      subtotal,
+      discountTotal,
+      extraDiscount,
+      taxTotal,
+      totalAmountRounded,
+      paidAmountRounded,
+      remainingAmount,
+      payment_mode,
+      paymentStatus,
+      notes,
+      id,
+      owner_id,
+    ]);
+  } catch (error) {
+    if (isDuplicateEntryError(error)) {
+      return duplicateInvoiceNumberResponse(res);
+    }
+    throw error;
+  }
 
   for (const item of invoiceItems) {
     await db.query(invoicePutQueries.createInvoiceItem, [
@@ -793,6 +921,7 @@ const updateInvoice = asyncHandler(async (req, res) => {
   return res.status(200).json({
     success: true,
     message: "Invoice updated successfully",
+    invoice_number: invoiceNumber,
   });
 });
 
@@ -1009,54 +1138,80 @@ const folderPath = path.join(
 
 const deleteInvoice = asyncHandler(async (req, res) => {
   const { id } = req.params;
-
   const owner_id = req.owner.id;
+  const connection = await db.getConnection();
 
-  // Check Invoice
-  const [invoice] = await db.query(invoiceDeleteQueries.getInvoice, [
-    id,
-    owner_id,
-  ]);
+  try {
+    await connection.beginTransaction();
 
-  if (invoice.length === 0) {
-    return res.status(404).json({
-      success: false,
-      message: "Invoice not found",
-    });
-  }
+    // Lock the invoice so it cannot be changed while its stock is restored.
+    const [invoice] = await connection.query(invoiceDeleteQueries.getInvoice, [
+      id,
+      owner_id,
+    ]);
 
-  // Get Invoice Items
-  const [invoiceItems] = await db.query(invoiceDeleteQueries.getInvoiceItems, [
-    id,
-  ]);
+    if (invoice.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({
+        success: false,
+        message: "Invoice not found",
+      });
+    }
 
-  if (invoiceItems.length > 0) {
-    // Restore Stock
+    const [invoiceItems] = await connection.query(
+      invoiceDeleteQueries.getInvoiceItems,
+      [id],
+    );
+
+    const quantityByProduct = new Map();
+
     for (const item of invoiceItems) {
-      const [products] = await db.query(invoiceDeleteQueries.getProductById, [
+      const quantity = Number(item.quantity);
+      quantityByProduct.set(
         item.product_id,
-        owner_id,
-      ]);
+        (quantityByProduct.get(item.product_id) || 0) + quantity,
+      );
+    }
 
-      if (products.length > 0) {
-        const newStock =
-          Number(products[0].stock_quantity) + Number(item.quantity);
+    for (const [productId, quantity] of quantityByProduct) {
+      const [stockResult] = await connection.query(
+        invoiceDeleteQueries.updateProductStock,
+        [quantity, productId, owner_id],
+      );
 
-        await db.query(invoiceDeleteQueries.updateProductStock, [
-          newStock,
-          item.product_id,
-          owner_id,
-        ]);
+      if (stockResult.affectedRows !== 1) {
+        throw new Error(`Unable to restore stock for product ${productId}`);
       }
     }
+
+    const [deleteResult] = await connection.query(
+      invoiceDeleteQueries.deleteInvoice,
+      [id, owner_id],
+    );
+
+    if (deleteResult.affectedRows !== 1) {
+      throw new Error("Unable to delete invoice");
+    }
+
+    await connection.commit();
+
+    // The database is now authoritative. Remove the generated file only after
+    // commit so a transaction rollback can never leave a broken invoice row.
+    const pdfDeleted = await removeStoredInvoicePdf(invoice[0].pdf_path);
+
+    return res.status(200).json({
+      success: true,
+      message: "Invoice deleted successfully and product stock restored",
+      data: {
+        pdf_deleted: pdfDeleted,
+      },
+    });
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
   }
-
-  await db.query(invoiceDeleteQueries.deleteInvoice, [id, owner_id]);
-
-  return res.status(200).json({
-    success: true,
-    message: "Invoice deleted successfully",
-  });
 });
 
 module.exports = {
