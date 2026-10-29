@@ -13,3 +13,8 @@ WHERE invoice_date IS NULL;
 -- 3. Enforce NOT NULL constraint after backfill
 ALTER TABLE invoices
 MODIFY COLUMN invoice_date DATE NOT NULL;
+
+-- customer last name add customer showing that fixed
+UPDATE customers 
+SET last_name = NULL 
+WHERE last_name = 'Customer';

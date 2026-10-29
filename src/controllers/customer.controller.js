@@ -138,14 +138,18 @@ const searchCustomers = asyncHandler(async (req, res) => {
   const owner_id = req.owner.id;
   const { search } = req.query;
 
-  if (!search) {
+  if (!search || !search.trim()) {
+    const [recentCustomers] = await db.query(
+      `SELECT * FROM customers WHERE owner_id = ? ORDER BY id DESC LIMIT 10`,
+      [owner_id],
+    );
     return res.status(200).json({
       success: true,
-      data: [],
+      data: recentCustomers,
     });
   }
 
-  const keyword = `%${search}%`;
+  const keyword = `%${search.trim()}%`;
 
   const [customers] = await db.query(customerGetQueries.searchCustomers, [
     owner_id,

@@ -117,38 +117,110 @@ const createInvoice = asyncHandler(async (req, res) => {
   //   });
   // }
 
-  // Remove extra spaces
+  // Customer details normalization
   const phone = phone_number ? phone_number.trim() : null;
+  const firstName = first_name ? first_name.trim() : "";
+  const lastName = last_name ? last_name.trim() : null;
+  const customerEmail = email ? email.trim() : null;
+  const customerCity = city ? city.trim() : null;
+  const customerState = state ? state.trim() : null;
+  const customerPincode = pincode ? pincode.trim() : null;
+  const customerGst = gst_number ? gst_number.trim() : null;
+  const customerAddress = address ? address.trim() : null;
 
-  // Check Customer
-  let customer_id = body_customer_id;
+  const normalizeStr = (val) => (val === null || val === undefined ? "" : String(val).trim());
 
-  if (!customer_id && phone) {
-    const [customers] = await db.query(invoicePostQueries.checkCustomerByPhone, [
-      owner_id,
-      phone,
-    ]);
+  const areCustomerDetailsEqual = (existing) => {
+    return (
+      normalizeStr(existing.first_name).toLowerCase() === normalizeStr(firstName).toLowerCase() &&
+      normalizeStr(existing.last_name).toLowerCase() === normalizeStr(lastName).toLowerCase() &&
+      normalizeStr(existing.phone_number) === normalizeStr(phone) &&
+      normalizeStr(existing.email).toLowerCase() === normalizeStr(customerEmail).toLowerCase() &&
+      normalizeStr(existing.city).toLowerCase() === normalizeStr(customerCity).toLowerCase() &&
+      normalizeStr(existing.state).toLowerCase() === normalizeStr(customerState).toLowerCase() &&
+      normalizeStr(existing.pincode) === normalizeStr(customerPincode) &&
+      normalizeStr(existing.gst_number).toUpperCase() === normalizeStr(customerGst).toUpperCase() &&
+      normalizeStr(existing.address).toLowerCase() === normalizeStr(customerAddress).toLowerCase()
+    );
+  };
 
-    if (customers.length > 0) {
-      customer_id = customers[0].id;
+  let customer_id = null;
+  let isNewCustomerCreated = false;
+  let savedCustomer = null;
+
+  // 1. If an existing customer was selected from the dropdown
+  if (body_customer_id) {
+    const [existingRows] = await db.query(
+      `SELECT * FROM customers WHERE id = ? AND owner_id = ?`,
+      [body_customer_id, owner_id],
+    );
+
+    if (existingRows.length > 0) {
+      const existing = existingRows[0];
+      if (areCustomerDetailsEqual(existing)) {
+        // Details unchanged -> link to existing customer
+        customer_id = existing.id;
+        savedCustomer = existing;
+      } else {
+        // Details were edited in invoice form -> create a new customer record instead of modifying existing
+        customer_id = null;
+      }
     }
   }
 
+  // 2. If no customer_id yet, check if phone identically matches an existing customer
+  if (!customer_id && phone) {
+    const [phoneMatched] = await db.query(
+      invoicePostQueries.checkCustomerByPhone,
+      [owner_id, phone],
+    );
+
+    if (phoneMatched.length > 0) {
+      const [matchedCustomerRows] = await db.query(
+        `SELECT * FROM customers WHERE id = ? AND owner_id = ?`,
+        [phoneMatched[0].id, owner_id],
+      );
+      if (
+        matchedCustomerRows.length > 0 &&
+        areCustomerDetailsEqual(matchedCustomerRows[0])
+      ) {
+        customer_id = matchedCustomerRows[0].id;
+        savedCustomer = matchedCustomerRows[0];
+      }
+    }
+  }
+
+  // 3. If no matching customer or details changed, create a new customer record
   if (!customer_id) {
     const [customerResult] = await db.query(invoicePostQueries.createCustomer, [
       owner_id,
-      first_name,
-      last_name,
+      firstName,
+      lastName,
       phone || null,
-      email,
-      city,
-      state,
-      pincode,
-      gst_number,
-      address,
+      customerEmail,
+      customerCity,
+      customerState,
+      customerPincode,
+      customerGst,
+      customerAddress,
     ]);
 
     customer_id = customerResult.insertId;
+    isNewCustomerCreated = true;
+    savedCustomer = {
+      id: customer_id,
+      owner_id,
+      first_name: firstName,
+      last_name: lastName,
+      phone_number: phone,
+      email: customerEmail,
+      city: customerCity,
+      state: customerState,
+      pincode: customerPincode,
+      gst_number: customerGst,
+      address: customerAddress,
+      status: "ACTIVE",
+    };
   }
 
   // Check Items
@@ -360,6 +432,9 @@ const createInvoice = asyncHandler(async (req, res) => {
       invoice_id: invoiceId,
       invoice_number: invoiceNumber,
       invoice_date: finalInvoiceDate,
+      customer_id,
+      new_customer_created: isNewCustomerCreated,
+      customer: savedCustomer,
     });
   } catch (error) {
     await connection.rollback();
@@ -589,7 +664,7 @@ const shareInvoice = asyncHandler(async (req, res) => {
   res.status(200).json({
     success: true,
     data: {
-      customer_name: `${data.first_name} ${data.last_name}`.trim(),
+      customer_name: `${data.first_name} ${data.last_name || ""}`.trim(),
       phone_number: data.phone_number,
       invoice_number: data.invoice_number,
       total_amount: data.total_amount,
