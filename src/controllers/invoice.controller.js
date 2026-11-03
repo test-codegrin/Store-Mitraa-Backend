@@ -192,6 +192,13 @@ const createInvoice = asyncHandler(async (req, res) => {
 
   // 3. If no matching customer or details changed, create a new customer record
   if (!customer_id) {
+    if (!firstName || !firstName.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Customer first name is required",
+      });
+    }
+
     const [customerResult] = await db.query(invoicePostQueries.createCustomer, [
       owner_id,
       firstName,
@@ -765,6 +772,13 @@ const updateInvoice = asyncHandler(async (req, res) => {
     return res.status(404).json({
       success: false,
       message: "Customer not found",
+    });
+  }
+
+  if (!first_name || !first_name.trim()) {
+    return res.status(400).json({
+      success: false,
+      message: "Customer first name is required",
     });
   }
 

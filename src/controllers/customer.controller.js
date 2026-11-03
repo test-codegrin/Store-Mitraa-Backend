@@ -42,6 +42,13 @@ const createCustomer = asyncHandler(async (req, res) => {
     status,
   } = req.body;
 
+  if (!first_name || !first_name.trim()) {
+    return res.status(400).json({
+      success: false,
+      message: "First name is required",
+    });
+  }
+
   // Check Phone Number
   const [phoneExists] = await db.query(customerPostQueries.checkPhone, [
     phone_number,
@@ -435,6 +442,13 @@ const updateCustomer = asyncHandler(async (req, res) => {
     address,
     status,
   } = req.body;
+
+  if (!first_name || !first_name.trim()) {
+    return res.status(400).json({
+      success: false,
+      message: "First name is required",
+    });
+  }
 
   // Check Phone Number
   const [phoneExists] = await db.query(

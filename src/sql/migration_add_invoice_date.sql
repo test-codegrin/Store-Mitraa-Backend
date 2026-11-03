@@ -18,3 +18,13 @@ MODIFY COLUMN invoice_date DATE NOT NULL;
 UPDATE customers 
 SET last_name = NULL 
 WHERE last_name = 'Customer';
+
+
+-- 4. Enforce first_name NOT NULL constraint on customers
+-- Backfill any existing NULL or empty first_name records before enforcing NOT NULL
+UPDATE customers
+SET first_name = 'Customer'
+WHERE first_name IS NULL OR TRIM(first_name) = '';
+
+ALTER TABLE customers
+MODIFY COLUMN first_name VARCHAR(100) NOT NULL;
